@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>加密日报 · 阅读器</title>
+<style>
+  :root{color-scheme:light dark}
+  body{margin:0 auto;padding:22px 16px;max-width:44em;font:16px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+  h1{font-size:1.15em;margin:.2em 0 .6em}
+  input{font-size:16px;padding:11px 12px;width:100%;box-sizing:border-box;border:1px solid #bbb;border-radius:8px}
+  button{margin-top:12px;padding:11px 20px;font-size:16px;border:0;border-radius:8px;background:#0a7cff;color:#fff;font-weight:600}
+  .hint{color:#777;font-size:13px;margin:0 0 14px}
+  .err{color:#c00;font-size:14px;min-height:1.2em}
+</style>
+</head>
+<body>
+<h1>加密日报</h1>
+<p class="hint">内容以密文存放在公开托管上，只有拿到当日密钥才能解出。密钥在每天的邮件里。</p>
+<p><input id="k" placeholder="粘贴当日密钥" autocomplete="off" autocapitalize="off" spellcheck="false"></p>
+<p><button id="go">解密并阅读</button></p>
+<p id="msg" class="err"></p>
+
+<script>
+(function () {
+  'use strict';
+  var params = new URLSearchParams(location.hash.replace(/^#/, ''));
+  var dataName = params.get('d') || 'payload.json';   // 密文文件名（默认同目录 payload.json）
+  var keyIn = params.get('k') || '';
+  var msg = document.getElementById('msg');
+  var input = document.getElementById('k');
+  if (keyIn) { input.value = keyIn; }
+
+  function b64uToBytes(s) {
+    s = String(s).trim().replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) { s += '='; }
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) { out[i] = bin.charCodeAt(i); }
+    return out;
+  }
+
+  async function decrypt(keyText) {
+    if (!(window.crypto && crypto.subtle)) { throw new Error('当前环境没有 WebCrypto，请用 https 打开'); }
+    var raw = b64uToBytes(keyText);
+    if (raw.length !== 32) { throw new Error('密钥长度不对（应为 32 字节）'); }
+    var res = await fetch(dataName, { cache: 'no-store' });
+    if (!res.ok) { throw new Error('取密文失败：HTTP ' + res.status); }
+    var box = await res.json();
+    if (!box || box.alg !== 'AES-256-GCM') { throw new Error('密文格式不认识'); }
+    var key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
+    // WebCrypto 的 AES-GCM 约定：data = 密文 || tag（本容器正是这样存的）
+    var plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64uToBytes(box.iv) }, key, b64uToBytes(box.ct));
+    return new TextDecoder('utf-8').decode(plain);
+  }
+
+  async function run() {
+    msg.textContent = '解密中…';
+    try {
+      var html = await decrypt(input.value);
+      document.open(); document.write(html); document.close();
+      // 链接里带 &i=i12 时跳到那一条（解密后整页被替换，所以要自己滚一次）
+      var anchor = params.get('i');
+      if (anchor) {
+        setTimeout(function () {
+          try {
+            var el = document.getElementById(anchor);
+            if (el && el.scrollIntoView) { el.scrollIntoView(); }
+            location.hash = '#' + anchor;
+          } catch (e) {}
+        }, 60);
+      }
+    } catch (e) {
+      msg.textContent = '失败：' + (e && e.message ? e.message : e);
+    }
+  }
+
+  document.getElementById('go').addEventListener('click', run);
+  if (keyIn) { run(); }   // 链接里带了 #k=… 就自动解密
+})();
+</script>
+</body>
+</html>
