@@ -1,38 +1,51 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>加密日报 · 阅读器</title>
+<!-- ⚠ 这一行必须在最前面：浏览器在页面加载时就会判定"这页是什么语言"，
+     而翻译入口是否出现取决于这个判定。链路里带 &l=en / &l=ar …，我们据此
+     在解析任何正文之前就把 <html lang> 设成原文语言（默认 en）。
+     如果这里写成 zh-CN，浏览器会认为"页面已是中文、无需翻译"，之后即使把内容
+     换成阿拉伯语/英语，翻译入口也不会再出现（2026-10-02 实测踩过）。 -->
+<script>
+(function () {
+  try {
+    var p = new URLSearchParams(location.hash.replace(/^#/, ''));
+    document.documentElement.lang = p.get('l') || 'en';
+    window.__LANG__ = document.documentElement.lang;
+  } catch (e) {}
+})();
+</script>
+<title>Reader</title>
 <style>
   :root{color-scheme:light dark}
-  body{margin:0 auto;padding:22px 16px;max-width:44em;font:16px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
-  h1{font-size:1.15em;margin:.2em 0 .6em}
+  body{margin:0 auto;padding:20px 16px;max-width:44em;font:17px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+  .gate h1{font-size:1.15em;margin:.2em 0 .6em}
   input{font-size:16px;padding:11px 12px;width:100%;box-sizing:border-box;border:1px solid #bbb;border-radius:8px}
   button{margin-top:12px;padding:11px 20px;font-size:16px;border:0;border-radius:8px;background:#0a7cff;color:#fff;font-weight:600}
   .hint{color:#777;font-size:13px;margin:0 0 14px}
   .err{color:#c00;font-size:14px;min-height:1.2em}
-  #loading{padding-top:38vh;text-align:center;color:#888;font-size:15px}
+  #loading{padding-top:36vh;text-align:center;color:#888}
 </style>
 </head>
 <body>
-<!-- 带密钥打开时，这个输入框从一开始就不显示（避免"闪一下"） -->
-<div id="gate" hidden>
+<div id="gate" class="gate" hidden>
   <h1>加密日报</h1>
   <p class="hint">内容以密文存放在公开托管上，只有拿到当日密钥才能解出。密钥在每天的邮件里。</p>
   <p><input id="k" placeholder="粘贴当日密钥" autocomplete="off" autocapitalize="off" spellcheck="false"></p>
   <p><button id="go">解密并阅读</button></p>
   <p id="msg" class="err"></p>
 </div>
-<div id="loading" hidden>解密中…</div>
+<div id="loading" hidden>Decrypting…</div>
 
 <script>
 (function () {
   'use strict';
   var params   = new URLSearchParams(location.hash.replace(/^#/, ''));
-  var dataName = params.get('d') || 'payload.json';   // 密文文件名
-  var keyIn    = params.get('k') || '';               // 密钥（URL 片段，不会发给服务器）
-  var anchor   = params.get('i') || '';               // 指定只显示哪一条
+  var dataName = params.get('d') || 'payload.json';
+  var keyIn    = params.get('k') || '';
+  var anchor   = params.get('i') || '';
   var gate    = document.getElementById('gate');
   var loading = document.getElementById('loading');
   var msg     = document.getElementById('msg');
@@ -48,55 +61,56 @@
   }
 
   async function decrypt(keyText) {
-    if (!(window.crypto && crypto.subtle)) { throw new Error('当前环境没有 WebCrypto，请用 https 打开'); }
+    if (!(window.crypto && crypto.subtle)) { throw new Error('no WebCrypto (need https)'); }
     var raw = b64uToBytes(keyText);
-    if (raw.length !== 32) { throw new Error('密钥长度不对（应为 32 字节）'); }
+    if (raw.length !== 32) { throw new Error('bad key length'); }
     var res = await fetch(dataName, { cache: 'no-store' });
-    if (!res.ok) { throw new Error('取密文失败：HTTP ' + res.status); }
+    if (!res.ok) { throw new Error('fetch ciphertext: HTTP ' + res.status); }
     var box = await res.json();
-    if (!box || box.alg !== 'AES-256-GCM') { throw new Error('密文格式不认识'); }
+    if (!box || box.alg !== 'AES-256-GCM') { throw new Error('unknown container'); }
     var key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
     var plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64uToBytes(box.iv) }, key, b64uToBytes(box.ct));
     return new TextDecoder('utf-8').decode(plain);
   }
 
-  // ── 单篇模式：只渲染这一条，没有任何多余字样与跳转 ─────────────────
-  //    保留 <html lang="xx">（浏览器翻译靠它识别语言）、保留条目自带的原文链接。
-  function singleItem(fullHtml, id) {
-    var doc = new DOMParser().parseFromString(fullHtml, 'text/html');
-    var el = doc.getElementById(id);
-    if (!el) { return null; }
-    var lang  = doc.documentElement.getAttribute('lang') || 'en';
-    var style = doc.querySelector('style');
-    var h2    = el.querySelector('h2');
-    var title = h2 ? h2.textContent : (doc.title || '');
-    title = title.replace(/[<>&"]/g, '');
-    return '<!DOCTYPE html><html lang="' + lang + '"><head><meta charset="utf-8">'
-         + '<meta name="viewport" content="width=device-width,initial-scale=1">'
-         + '<title>' + title + '</title>'
-         + (style ? style.outerHTML : '')
-         + '<style>article{border-top:0;padding-top:0}body{padding-top:18px}</style>'
-         + '</head><body>' + el.outerHTML + '</body></html>';
+  // ── 就地渲染：不整体替换文档（document.write 会让浏览器丢掉"本页语言"的判定）──
+  //    单篇模式只取目标那一条；同时把原文页的 <style> 与 lang 搬过来。
+  function renderIntoDoc(fullHtml, id) {
+    var doc  = new DOMParser().parseFromString(fullHtml, 'text/html');
+    var lang = doc.documentElement.getAttribute('lang') || window.__LANG__ || 'en';
+    var st   = doc.querySelector('style');
+    if (st) {
+      var s = document.createElement('style');
+      s.textContent = st.textContent + '\narticle{border-top:0;padding-top:0}';
+      document.head.appendChild(s);
+    }
+    var el = id ? doc.getElementById(id) : null;
+    if (el) {
+      document.body.innerHTML = el.outerHTML;
+      var h2 = el.querySelector('h2');
+      if (h2) { document.title = h2.textContent; }
+    } else {
+      document.body.innerHTML = doc.body.innerHTML;   // 兜底：整页
+    }
+    document.documentElement.lang = lang;              // 再确认一次语言
+    document.documentElement.setAttribute('translate', 'yes');
   }
-
-  function show(html) { document.open(); document.write(html); document.close(); }
 
   async function run() {
     if (keyIn) { gate.hidden = true; loading.hidden = false; }
     try {
       var html = await decrypt(input.value.trim());
-      var out  = html;
-      if (anchor) { var one = singleItem(html, anchor); if (one) { out = one; } }
-      show(out);
+      renderIntoDoc(html, anchor);
     } catch (e) {
       loading.hidden = true;
       gate.hidden = false;
-      msg.textContent = '失败：' + (e && e.message ? e.message : e);
+      gate.querySelector('h1').textContent = '解密失败';
+      msg.textContent = (e && e.message ? e.message : e) + '（若密钥过期，请用最新邮件里的链接）';
     }
   }
 
   document.getElementById('go').addEventListener('click', run);
-  if (keyIn) { run(); } else { gate.hidden = false; }
+  if (keyIn) { run(); } else { gate.hidden = false; loading.hidden = true; }
 })();
 </script>
 </body>
