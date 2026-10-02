@@ -29,10 +29,10 @@
 <script>
 (function () {
   'use strict';
-  var params  = new URLSearchParams(location.hash.replace(/^#/, ''));
+  var params   = new URLSearchParams(location.hash.replace(/^#/, ''));
   var dataName = params.get('d') || 'payload.json';   // 密文文件名
   var keyIn    = params.get('k') || '';               // 密钥（URL 片段，不会发给服务器）
-  var anchor   = params.get('i') || '';               // 只渲染这一条
+  var anchor   = params.get('i') || '';               // 指定只显示哪一条
   var gate    = document.getElementById('gate');
   var loading = document.getElementById('loading');
   var msg     = document.getElementById('msg');
@@ -56,28 +56,27 @@
     var box = await res.json();
     if (!box || box.alg !== 'AES-256-GCM') { throw new Error('密文格式不认识'); }
     var key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
-    // WebCrypto 约定：data = 密文 || tag（容器正是这样存的）
     var plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64uToBytes(box.iv) }, key, b64uToBytes(box.ct));
     return new TextDecoder('utf-8').decode(plain);
   }
 
-  // 只渲染指定那一条（保持整页 <html lang>，浏览器翻译才认得出语言）
+  // ── 单篇模式：只渲染这一条，没有任何多余字样与跳转 ─────────────────
+  //    保留 <html lang="xx">（浏览器翻译靠它识别语言）、保留条目自带的原文链接。
   function singleItem(fullHtml, id) {
     var doc = new DOMParser().parseFromString(fullHtml, 'text/html');
     var el = doc.getElementById(id);
     if (!el) { return null; }
     var lang  = doc.documentElement.getAttribute('lang') || 'en';
     var style = doc.querySelector('style');
-    var h1    = doc.querySelector('h1');
-    var n     = doc.querySelectorAll('article').length;
-    var back  = location.pathname + '#d=' + encodeURIComponent(dataName) + '&k=' + encodeURIComponent(keyIn);
+    var h2    = el.querySelector('h2');
+    var title = h2 ? h2.textContent : (doc.title || '');
+    title = title.replace(/[<>&"]/g, '');
     return '<!DOCTYPE html><html lang="' + lang + '"><head><meta charset="utf-8">'
-         + '<meta name="viewport" content="width=device-width,initial-scale=1"><title>' + (doc.title || '') + '</title>'
+         + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+         + '<title>' + title + '</title>'
          + (style ? style.outerHTML : '')
-         + '</head><body>'
-         + '<p class="top">' + (h1 ? h1.textContent : '') + ' ｜ 单条视图（本页共 ' + n + ' 条）｜ <a href="' + back + '">显示全部</a></p>'
-         + el.outerHTML
-         + '</body></html>';
+         + '<style>article{border-top:0;padding-top:0}body{padding-top:18px}</style>'
+         + '</head><body>' + el.outerHTML + '</body></html>';
   }
 
   function show(html) { document.open(); document.write(html); document.close(); }
