@@ -12,23 +12,31 @@
   button{margin-top:12px;padding:11px 20px;font-size:16px;border:0;border-radius:8px;background:#0a7cff;color:#fff;font-weight:600}
   .hint{color:#777;font-size:13px;margin:0 0 14px}
   .err{color:#c00;font-size:14px;min-height:1.2em}
+  #loading{padding-top:38vh;text-align:center;color:#888;font-size:15px}
 </style>
 </head>
 <body>
-<h1>加密日报</h1>
-<p class="hint">内容以密文存放在公开托管上，只有拿到当日密钥才能解出。密钥在每天的邮件里。</p>
-<p><input id="k" placeholder="粘贴当日密钥" autocomplete="off" autocapitalize="off" spellcheck="false"></p>
-<p><button id="go">解密并阅读</button></p>
-<p id="msg" class="err"></p>
+<!-- 带密钥打开时，这个输入框从一开始就不显示（避免"闪一下"） -->
+<div id="gate" hidden>
+  <h1>加密日报</h1>
+  <p class="hint">内容以密文存放在公开托管上，只有拿到当日密钥才能解出。密钥在每天的邮件里。</p>
+  <p><input id="k" placeholder="粘贴当日密钥" autocomplete="off" autocapitalize="off" spellcheck="false"></p>
+  <p><button id="go">解密并阅读</button></p>
+  <p id="msg" class="err"></p>
+</div>
+<div id="loading" hidden>解密中…</div>
 
 <script>
 (function () {
   'use strict';
-  var params = new URLSearchParams(location.hash.replace(/^#/, ''));
-  var dataName = params.get('d') || 'payload.json';   // 密文文件名（默认同目录 payload.json）
-  var keyIn = params.get('k') || '';
-  var msg = document.getElementById('msg');
-  var input = document.getElementById('k');
+  var params  = new URLSearchParams(location.hash.replace(/^#/, ''));
+  var dataName = params.get('d') || 'payload.json';   // 密文文件名
+  var keyIn    = params.get('k') || '';               // 密钥（URL 片段，不会发给服务器）
+  var anchor   = params.get('i') || '';               // 只渲染这一条
+  var gate    = document.getElementById('gate');
+  var loading = document.getElementById('loading');
+  var msg     = document.getElementById('msg');
+  var input   = document.getElementById('k');
   if (keyIn) { input.value = keyIn; }
 
   function b64uToBytes(s) {
@@ -48,34 +56,48 @@
     var box = await res.json();
     if (!box || box.alg !== 'AES-256-GCM') { throw new Error('密文格式不认识'); }
     var key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
-    // WebCrypto 的 AES-GCM 约定：data = 密文 || tag（本容器正是这样存的）
+    // WebCrypto 约定：data = 密文 || tag（容器正是这样存的）
     var plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64uToBytes(box.iv) }, key, b64uToBytes(box.ct));
     return new TextDecoder('utf-8').decode(plain);
   }
 
+  // 只渲染指定那一条（保持整页 <html lang>，浏览器翻译才认得出语言）
+  function singleItem(fullHtml, id) {
+    var doc = new DOMParser().parseFromString(fullHtml, 'text/html');
+    var el = doc.getElementById(id);
+    if (!el) { return null; }
+    var lang  = doc.documentElement.getAttribute('lang') || 'en';
+    var style = doc.querySelector('style');
+    var h1    = doc.querySelector('h1');
+    var n     = doc.querySelectorAll('article').length;
+    var back  = location.pathname + '#d=' + encodeURIComponent(dataName) + '&k=' + encodeURIComponent(keyIn);
+    return '<!DOCTYPE html><html lang="' + lang + '"><head><meta charset="utf-8">'
+         + '<meta name="viewport" content="width=device-width,initial-scale=1"><title>' + (doc.title || '') + '</title>'
+         + (style ? style.outerHTML : '')
+         + '</head><body>'
+         + '<p class="top">' + (h1 ? h1.textContent : '') + ' ｜ 单条视图（本页共 ' + n + ' 条）｜ <a href="' + back + '">显示全部</a></p>'
+         + el.outerHTML
+         + '</body></html>';
+  }
+
+  function show(html) { document.open(); document.write(html); document.close(); }
+
   async function run() {
-    msg.textContent = '解密中…';
+    if (keyIn) { gate.hidden = true; loading.hidden = false; }
     try {
-      var html = await decrypt(input.value);
-      document.open(); document.write(html); document.close();
-      // 链接里带 &i=i12 时跳到那一条（解密后整页被替换，所以要自己滚一次）
-      var anchor = params.get('i');
-      if (anchor) {
-        setTimeout(function () {
-          try {
-            var el = document.getElementById(anchor);
-            if (el && el.scrollIntoView) { el.scrollIntoView(); }
-            location.hash = '#' + anchor;
-          } catch (e) {}
-        }, 60);
-      }
+      var html = await decrypt(input.value.trim());
+      var out  = html;
+      if (anchor) { var one = singleItem(html, anchor); if (one) { out = one; } }
+      show(out);
     } catch (e) {
+      loading.hidden = true;
+      gate.hidden = false;
       msg.textContent = '失败：' + (e && e.message ? e.message : e);
     }
   }
 
   document.getElementById('go').addEventListener('click', run);
-  if (keyIn) { run(); }   // 链接里带了 #k=… 就自动解密
+  if (keyIn) { run(); } else { gate.hidden = false; }
 })();
 </script>
 </body>
