@@ -1,0 +1,178 @@
+name: 官媒日报·云端（手动·当前未启用）
+
+# ══════════════════════════════════════════════════════════════════
+# 本机那套管线的云端副本，目前刻意处于「已部署但未启动」状态。
+#
+#   · 触发方式**只有 workflow_dispatch**（手动点按钮 / 调 API）——没有 schedule。
+#     不去点它，它就永远不会跑，也不会发任何邮件。
+#   · 正式启用时，把文件末尾的 schedule 块取消注释即可（一并记得停掉本机的计划任务，
+#     两边都往 main 推密文，同时跑会互相顶掉）。
+#
+# ⚠ 管线代码在这个仓库里是**加密存放**的（cloud.enc/payload.bin），
+#   runner 上先用 Secret `CLOUD_CODE_KEY` 解密到临时目录再执行。
+#   本 workflow 本身无法加密 —— GitHub 必须能解析它才会注册。
+#   加密能挡"路过的人翻仓库"，挡不住"能跑这个 workflow 的人"（他必然拿得到那个 Secret）。
+#
+# ⚠ 踩过的坑：`runner` 上下文**不能用在 job 级 `env`** 里（只在 step 级可用）。
+#   写了不会被拒绝成"语法错误"，而是整份 workflow 校验失败：名字回退成文件路径，
+#   每次 push 还会记一条 jobs=0 的失败运行。CLOUD_ROOT 因此改由解密步骤写进 $GITHUB_ENV。
+#
+# 与本机的差别只有三处，全部由环境变量切换；本机不设 → 行为与本机完全一致：
+#     DAILY_MAIL_PASSWORD  授权码走 Secret，而不是本机 DPAPI 加密的 clixml
+#     PAGES_PUSH_URL       推送用 GITHUB_TOKEN，而不是本机 SSH 部署密钥
+#     MENA_CDP_HEADLESS=1  runner 没有交互式桌面 → 浏览器改无头（无 --offscreen）
+# ══════════════════════════════════════════════════════════════════
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '目标日期 yyyy-MM-dd（留空 = 北京时间的昨天）'
+        required: false
+        default: ''
+      no_mail:
+        description: '试跑：只采集/成稿，不发信'
+        type: boolean
+        default: false
+      no_publish:
+        description: '试跑：不推送加密缓存页'
+        type: boolean
+        default: false
+
+# 正式启用时取消下面注释（GitHub 的 cron 用 UTC：16:05 UTC = 北京 00:05）
+#  schedule:
+#    - cron: '5 16 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mena-daily-cloud
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    # Windows runner：脚本是 PowerShell 5.1 + curl.exe + Chrome 的 Windows 组合，
+    # 用 Windows 可以逐字复用本机代码，不必移植到 pwsh 7/Linux。
+    # 公开仓库的标准 runner 不计分钟数。
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解密并展开管线代码
+        shell: powershell
+        env:
+          CLOUD_CODE_KEY: ${{ secrets.CLOUD_CODE_KEY }}
+        run: |
+          if (-not $env:CLOUD_CODE_KEY) {
+            throw "未设置仓库 Secret CLOUD_CODE_KEY（解密口令）—— 见 cloud.enc/README.md"
+          }
+          $root = Join-Path $env:RUNNER_TEMP 'cloud'
+          & .\cloud.enc\bootstrap.ps1 -Out $root
+          "CLOUD_ROOT=$root" >> $env:GITHUB_ENV
+
+      - name: 恢复增量缓存（翻译 / 日期）
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/cloud/_cache/mena-translation-cache.json
+            ${{ runner.temp }}/cloud/_cache/mena-date-cache.json
+            ${{ runner.temp }}/cloud/_cache/translation-cache.json
+          key: daily-cache-${{ github.run_id }}
+          restore-keys: daily-cache-
+
+      - name: 目标日期（默认 = 北京时间昨天）
+        id: d
+        shell: pwsh
+        env:
+          IN_DATE: ${{ inputs.date }}
+        run: |
+          $in = $env:IN_DATE
+          if ($in) {
+            if ($in -notmatch '^\d{4}-\d{2}-\d{2}$') { throw "日期格式必须是 yyyy-MM-dd，收到：$in" }
+            $d = $in
+          } else {
+            # ⚠ runner 的时区是 UTC，直接 (Get-Date).AddDays(-1) 会把目标日算成前一天
+            $d = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId(
+                   [DateTime]::UtcNow, 'China Standard Time').AddDays(-1).ToString('yyyy-MM-dd')
+          }
+          "date=$d" >> $env:GITHUB_OUTPUT
+          Write-Host "目标日期：$d"
+
+      - name: 生成邮件配置（从仓库 Variable 读，不落进仓库）
+        shell: pwsh
+        env:
+          MAIL_USER: ${{ vars.MAIL_USER }}
+          MAIL_TO: ${{ vars.MAIL_TO }}
+        run: |
+          if (-not $env:MAIL_USER) { throw "未设置仓库 Variable MAIL_USER（发件邮箱）—— 见 cloud.enc/README.md" }
+          $to = @($env:MAIL_TO -split '[,\s]+' | Where-Object { $_ })
+          if ($to.Count -eq 0) { $to = @($env:MAIL_USER) }
+          # ⚠ From 不只是发件人：mena-lib.ps1 / daily.ps1 还拿它当 MyMemory 翻译接口的
+          #    de= 参数（配额从匿名 5000 字符/天提到 50000）。所以必须填。
+          $cfg = [ordered]@{
+            SmtpServer = 'smtp.qq.com'; Port = 465; UseSsl = $true
+            User = $env:MAIL_USER; From = $env:MAIL_USER; FromName = '官媒国际新闻日报'
+            To = $to; SubjectPrefix = '官媒国际新闻日报'
+          }
+          [IO.File]::WriteAllText((Join-Path $env:CLOUD_ROOT 'mail-config.json'),
+            ($cfg | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding($false)))
+          Write-Host "mail-config.json 已生成（发件人 $($env:MAIL_USER)，收件人 $($to -join ',')）"
+
+      - name: 环境自检（node / Chrome）
+        shell: powershell
+        run: |
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+          $node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+          if ($node) { Write-Host "node: $node ($(& $node -v))" }
+          else { Write-Host "::warning::找不到 node.exe —— 9 家 CDP 源与加密缓存页会退化" }
+          $cands = @(
+            (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
+          )
+          $chrome = $cands | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if ($chrome) {
+            "CHROME_PATH=$chrome" >> $env:GITHUB_ENV
+            Write-Host "Chrome: $chrome"
+          } else {
+            Write-Host "::warning::找不到 Chrome —— 9 家 Cloudflare 站会被跳过（中东日报会明显变短）"
+          }
+
+      - name: 跑两条管线（采集 → 成稿 → 缓存页 → 发信）
+        shell: powershell
+        env:
+          DAILY_MAIL_PASSWORD: ${{ secrets.DAILY_MAIL_PASSWORD }}
+          PAGES_PUSH_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          MENA_CDP_HEADLESS: '1'
+        run: |
+          Set-Location $env:CLOUD_ROOT
+          $a = @('-NoProfile','-ExecutionPolicy','Bypass','-File','.\bin\run-scheduled.ps1',
+                 '-Date','${{ steps.d.outputs.date }}')
+          if ('${{ inputs.no_mail }}'    -eq 'true') { $a += '-NoMail' }
+          if ('${{ inputs.no_publish }}' -eq 'true') { $a += '-NoPublish' }
+          Write-Host ("执行：" + ($a -join ' '))
+          & powershell.exe @a
+          $code = $LASTEXITCODE
+          Write-Host "run-scheduled.ps1 退出码：$code"
+          # run-scheduled 把输出写进 logs\*.log（计划任务没有控制台），这里原样倒进 Actions 日志
+          Get-ChildItem .\logs\*.log -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host ("`n===== $($_.Name) =====")
+            Get-Content $_.FullName -Encoding UTF8
+          }
+          exit $code
+
+      - name: 上传产物（日报 / 归档 / 日志）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-${{ steps.d.outputs.date }}
+          path: |
+            ${{ runner.temp }}/cloud/reports/
+            ${{ runner.temp }}/cloud/logs/
+            ${{ runner.temp }}/cloud/archive/
+            ${{ runner.temp }}/cloud/archive-mena/
+          retention-days: 14
+          if-no-files-found: ignore
