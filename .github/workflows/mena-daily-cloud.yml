@@ -19,6 +19,15 @@ name: 官媒日报·云端（每日 02:05 · 带【云端】标记）
 #   写了不会被拒绝成"语法错误"，而是整份 workflow 校验失败：名字回退成文件路径，
 #   每次 push 还会记一条 jobs=0 的失败运行。CLOUD_ROOT 因此改由解密步骤写进 $GITHUB_ENV。
 #
+# ⚠ 2026-10-13 第一次真跑就撞上的坑：**内联 PowerShell 必须用 `shell: pwsh`**。
+#   用 `shell: powershell`（Windows PowerShell 5.1）时，runner 会把 `run:` 里的中文
+#   写进一个 **UTF-8 无 BOM** 的临时 .ps1，而 5.1 按 GBK 解码 → 中文变乱码、
+#   **吃掉闭合引号** → `Unexpected token … ParserError`，整步失败、后续步骤全 skipped。
+#   症状极像"Secret 没配"，但日志里 `env: CLOUD_CODE_KEY: ***` 证明 Secret 是有的
+#   —— 判据是**报错类型**：`ParserError` = 编码问题，`HMAC mismatch` = 口令不对。
+#   ⚠ 管线脚本本身仍以 `powershell.exe`（5.1）执行（见步骤 8 的显式调用），那是刻意的
+#   "与本机同版本"；**只有 workflow 的内联片段**需要 pwsh（pwsh 7 默认按 UTF-8 读无 BOM 文件）。
+#
 # 与本机的差别，全部由环境变量切换；本机不设 → 行为与本机完全一致：
 #     DAILY_MAIL_PASSWORD  授权码走 Secret，而不是本机 DPAPI 加密的 clixml
 #     PAGES_PUSH_URL       推送用 GITHUB_TOKEN，而不是本机 SSH 部署密钥
@@ -71,7 +80,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 解密并展开管线代码
-        shell: powershell
+        shell: pwsh
         env:
           CLOUD_CODE_KEY: ${{ secrets.CLOUD_CODE_KEY }}
         run: |
@@ -131,7 +140,7 @@ jobs:
           Write-Host "mail-config.json 已生成（发件人 $($env:MAIL_USER)，收件人 $($to -join ',')）"
 
       - name: 环境自检（node / Chrome）
-        shell: powershell
+        shell: pwsh
         run: |
           Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
           $node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
@@ -151,7 +160,7 @@ jobs:
           }
 
       - name: 跑两条管线（采集 → 成稿 → 缓存页 → 发信）
-        shell: powershell
+        shell: pwsh
         env:
           DAILY_MAIL_PASSWORD: ${{ secrets.DAILY_MAIL_PASSWORD }}
           PAGES_PUSH_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git

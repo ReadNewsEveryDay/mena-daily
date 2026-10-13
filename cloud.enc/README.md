@@ -12,6 +12,11 @@
 >    `payload.bin` 已用新口令重新打包。**必须把新口令同步到仓库 Secret**，
 >    两边不一致时云端会在解密步骤报 `HMAC mismatch`。新口令见本机
 >    `I:\AIWorkSpace\.dsh-tmp\cloud-code-key-20261013.txt`（建议转存密码管理器后删除该文件）。
+> 5. **内联 PowerShell 改用 `shell: pwsh`**（2026-10-13 第一次真跑就撞上）：
+>    用 `shell: powershell`（5.1）时，runner 把 `run:` 里的中文写进一个 **UTF-8 无 BOM**
+>    的临时 .ps1，5.1 按 GBK 解码 → 中文乱码**吃掉闭合引号** → `ParserError`、整步失败。
+>    症状极像"Secret 没配"，**判据是报错类型**：`ParserError` = 编码，`HMAC mismatch` = 口令。
+>    管线本身仍以 `powershell.exe`（5.1）执行 —— 只有 workflow 的内联片段用 pwsh。
 
 本机那套「国际新闻日报 + 中东官媒日报」管线的云端副本。本机仍是主运行方式；
 云端这份现在**每天也会跑一趟并发出对照邮件**（PC 关机那晚它照样跑）。
@@ -21,7 +26,7 @@
 ```
 .github/workflows/mena-daily-cloud.yml   明文（GitHub 必须能解析它）
 cloud.enc/
-├── payload.bin       管线代码的**加密载荷**（16 个文件：脚本 + 配置）
+├── payload.bin       管线代码的**加密载荷**（19 个文件：脚本 + 配置）
 ├── bootstrap.ps1     明文引导脚本：验 HMAC → 解密 → 展开到临时目录
 ├── pack-cloud.ps1    本地打包工具：把本机代码重新加密成 payload.bin
 └── README.md         本文件
