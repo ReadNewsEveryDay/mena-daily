@@ -1,7 +1,20 @@
-# 云端副本（GitHub Actions）· 已部署，**当前未启用**
+# 云端副本（GitHub Actions）· **已启用（每日 02:05）**
+
+> **2026-10-13 变更（本轮）**
+> 1. **开启定时**：`schedule: 5 18 * * *`（UTC）= 北京 **02:05**，比本机（00:05）晚两小时；
+>    手动 `workflow_dispatch` 照旧可用。
+> 2. **加【云端】标记**：邮件主题与两份日报的正文标题都带【云端】（workflow 里设
+>    `DAILY_CLOUD_TAG=1`；本机不设 → 一字不变）。用于和本机那份逐条对照。
+> 3. **定时那趟不推加密缓存页**：自动追加 `-NoPublish`。两边推同一日期会互顶，
+>    让已发邮件里的「缓存原文」链接 404（2026-10-09~10-13 连挂 5 晚就是这个原因）。
+>    所以**云端那封邮件只有「查看原文」**；手动触发仍可推送。
+> 4. **口令轮换**：`CLOUD_CODE_KEY` 已重新生成（旧口令在本机已无迹可寻），
+>    `payload.bin` 已用新口令重新打包。**必须把新口令同步到仓库 Secret**，
+>    两边不一致时云端会在解密步骤报 `HMAC mismatch`。新口令见本机
+>    `I:\AIWorkSpace\.dsh-tmp\cloud-code-key-20261013.txt`（建议转存密码管理器后删除该文件）。
 
 本机那套「国际新闻日报 + 中东官媒日报」管线的云端副本。本机仍是主运行方式；
-云端这套是**备好放着**的，你不去点它，它永远不会跑、也不会发任何邮件。
+云端这份现在**每天也会跑一趟并发出对照邮件**（PC 关机那晚它照样跑）。
 
 ## 目录
 
@@ -64,23 +77,35 @@ Actions → 左侧选 **「官媒日报·云端（手动·当前未启用）」*
 
 ```powershell
 cd I:\WorkSpaceForAI\international\_gha-repo
+# 口令在 I:\AIWorkSpace\.dsh-tmp\cloud-code-key-20261013.txt 的最后一行（2026-10-13 轮换后的新口令）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\cloud.enc\pack-cloud.ps1 `
     -Source I:\WorkSpaceForAI\international\Project_NewsEveryday `
-    -Key '<你的 CLOUD_CODE_KEY>'
+    -Key '<新口令>'
 git add cloud.enc/payload.bin
 git commit -m 'cloud: 同步管线代码'
 git push
 ```
 
-换口令也是同一条命令（换完记得同步改 Secret）。
+**打包后建议自检一次**（用同一个口令解回来，确认 18 个文件都在、且带【云端】标记）：
 
-## 怎么正式启用
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\cloud.enc\bootstrap.ps1 `
+    -Payload .\cloud.enc\payload.bin -Out $env:TEMP\cloud-check -Key '<新口令>'
+Select-String -Path $env:TEMP\cloud-check\bin\send-mail.ps1 -Pattern 'DAILY_CLOUD_TAG'
+```
 
-1. 编辑 `.github/workflows/mena-daily-cloud.yml`，取消文件末尾 `schedule:` 那两行的注释
-   （GitHub 的 cron 用 **UTC**：`5 16 * * *` = 北京 00:05）。
-2. **停掉本机的计划任务**「官媒国际新闻日报」：
-   `Disable-ScheduledTask -TaskName '官媒国际新闻日报'`
-   两边都会往仓库 `main` 推当天密文，同时跑会互相顶掉（后推的失败）。
+换口令也是同一条命令（换完**必须**同步改 Secret，否则云端报 `HMAC mismatch`）。
+
+## 已启用的状态 / 怎么停
+
+- **定时**：北京 02:05（`5 18 * * *` UTC），每天跑一趟，**发对照邮件**。
+- **本机照常跑**（北京 00:05）。两边刻意错开两小时；且**定时那趟不推缓存页**，
+  所以不会互相顶掉——这一点不要改，改了就会重现「缓存原文链接全 404」。
+- **想停掉云端定时**：把 workflow 里 `schedule:` 那两行注释回去即可（手动触发仍可用）。
+- **两个副作用，知情即可**：
+  1. 云端那封邮件**没有「缓存原文」链接**（只有「查看原文」）；
+  2. 两边共用同一个 `MAIL_USER`，MyMemory 翻译配额（5 万字符/天）按它算，可能相互抢；
+     撞了只是部分标题不翻译，不影响发信。真要彻底避免，就让云端隔天跑。
 
 ## 已知限制（来自探针在真实 runner 上的实测，不是推测）
 
