@@ -112,6 +112,19 @@ Select-String -Path $env:TEMP\cloud-check\bin\send-mail.ps1 -Pattern 'DAILY_CLOU
   2. 两边共用同一个 `MAIL_USER`，MyMemory 翻译配额（5 万字符/天）按它算，可能相互抢；
      撞了只是部分标题不翻译，不影响发信。真要彻底避免，就让云端隔天跑。
 
+### 第一次真跑记录（2026-10-13 · run #4 · `workflow_dispatch` 试跑）
+
+- 触发参数：`no_mail=true, no_publish=true` —— 只验证"采集 → 成稿"，**不发信、不推缓存页**。
+- 结果：**全部步骤 success**，耗时约 22 分钟（国际 93 s ＋ 中东 1262 s）。
+- 产物：`daily-2026-10-12`（939 KB：`reports` 2 ＋ `logs` 1 ＋ `archive` 4 ＋ `archive-mena/raw` 60）。
+- 验证到两件事：① 加密载荷解得开（新口令 + Secret 正确）；
+  ② **【云端】标记生效** —— 两份日报标题为
+  `# 中东官媒每日信息清单【云端】 · 2026-10-12` 与 `# 官媒国际新闻日报【云端】 · 2026-10-12（周一）`。
+- 首跑还撞上一个坑（已修，见上文第 5 条）：**内联 PowerShell 用 `shell: powershell`（5.1）时中文被按 GBK 解码 → `ParserError`**。
+- ⚠ **该次试跑的条目数不能当"云端惩罚"用**：日期是 10-12，而本机那份 10-12 日报是 **22 小时前**采的，
+  列表页翻页 + 目标日过滤会刷掉大量条目（中东 94 vs 258、国际 98 vs 148 的差距主要来自这个）。
+  干净的对照只能看**同一天、相隔 2 小时**的两趟（本机 00:05 / 云端 02:05）。
+
 ## 已知限制（来自探针在真实 runner 上的实测，不是推测）
 
 出口 IP 是 Azure 机房段（实测 `130.131.204.201`、`48.211.211.35`）。两次运行、
@@ -120,7 +133,7 @@ Select-String -Path $env:TEMP\cloud-check\bin\send-mail.ps1 -Pattern 'DAILY_CLOU
 | 类别 | 结果 |
 |---|---|
 | 中东 HTTP 通道（17 项） | 15 项 OK；**NNA（黎巴嫩）稳定被 Cloudflare 403**；APS（总统）稳定取到空页面 |
-| 中东浏览器通道（9 项） | **MENA / IRNA / Arab News 稳定通过**；**SABA、INA、Al-Sabah、SUNA、MAP 稳定被拦**（等到 82 秒仍挑战页）；Ahram 摇摆（1/2） |
+| 中东浏览器通道（9 项） | 探针初测（2026-10-08）：MENA / IRNA / Arab News 通过；SABA、INA、Al-Sabah、SUNA、MAP 被拦；Ahram 摇摆。<br>**2026-10-13 真跑（run #4）实测更新**：只有 **Arab News（19 条）与 IRNA（20 条）通过**；**MENA、Ahram、SABA、INA、Al-Sabah、SUNA、MAP 共 7 家"三轮均被 Cloudflare 拦截，放弃该源"**（MENA 已不再稳定通过） |
 | 国内官媒对照组（10 项） | 8 项 OK；**中新网 403** |
 
 也就是说：**不挂代理的话，中东日报会稳定少掉约 1/4–3/10 的条目**，缺失集中在
