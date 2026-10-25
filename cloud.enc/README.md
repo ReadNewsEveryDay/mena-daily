@@ -112,6 +112,12 @@ Select-String -Path $env:TEMP\cloud-check\bin\send-mail.ps1 -Pattern 'DAILY_CLOU
 
 换口令也是同一条命令（换完**必须**同步改 Secret，否则云端报 `HMAC mismatch`）。
 
+> ⚠ **换口令还要改本机的索引口令**：`cache-index\<日期>.enc` 用的是同一个
+> `CLOUD_CODE_KEY`（SHA-256 后当密钥）。把新口令写进
+> `Project_NewsEveryday\_cache\cloud-code-key.txt`（最后一行，32 字符），
+> 否则本机索引仍用旧口令加密，云端解不开 → 退回"全部自建"（邮件照发，只是更慢）。
+> 已发布的旧索引不用重做；换口令后新生成的索引才用新口令。
+
 ## 已启用的状态 / 怎么停
 
 - **定时**：北京 02:05（`5 18 * * *` UTC），每天跑一趟，**发对照邮件**。
