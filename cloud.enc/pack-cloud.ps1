@@ -43,7 +43,7 @@ foreach ($f in Get-ChildItem (Join-Path $Source 'bin') -File |
                 Where-Object { $_.Extension -in @('.ps1', '.js', '.html') }) {
     $map["bin/$($f.Name)"] = $f.FullName
 }
-foreach ($n in @('mena-intl-rules.json', 'build-digest.mjs', 'digest-encrypt.mjs')) {
+foreach ($n in @('mena-intl-rules.json', 'build-digest.mjs', 'digest-encrypt.mjs', 'digest-decrypt.mjs')) {
     $p = Join-Path $Source "_cache\$n"
     if (-not (Test-Path $p)) { throw "缺少文件：$p" }
     $map["_cache/$n"] = $p
