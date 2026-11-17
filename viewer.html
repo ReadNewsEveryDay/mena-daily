@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
 <!-- ⚠ 这一行必须在最前面：浏览器在页面加载时就会判定"这页是什么语言"，
      而翻译入口是否出现取决于这个判定。链路里带 &l=en / &l=ar …，我们据此
      在解析任何正文之前就把 <html lang> 设成原文语言（默认 en）。
@@ -32,10 +33,11 @@
 <body>
 <div id="gate" class="gate" hidden>
   <h1>加密日报</h1>
-  <p class="hint">内容以密文存放在公开托管上，只有拿到当日密钥才能解出。密钥在每天的邮件里。</p>
-  <p><input id="k" placeholder="粘贴当日密钥" autocomplete="off" autocapitalize="off" spellcheck="false"></p>
+  <p class="hint">内容以密文存放。密钥<strong>只需输入一次</strong>，之后这台设备会自动记住。</p>
+  <p><input id="k" placeholder="粘贴密钥" autocomplete="off" autocapitalize="off" spellcheck="false"></p>
   <p><button id="go">解密并阅读</button></p>
   <p id="msg" class="err"></p>
+  <p class="hint"><a href="#" id="forget">清除本机记住的密钥</a></p>
 </div>
 <div id="loading" hidden>Decrypting…</div>
 
@@ -50,6 +52,18 @@
   var loading = document.getElementById('loading');
   var msg     = document.getElementById('msg');
   var input   = document.getElementById('k');
+
+  // ── 记住密钥（2026-11-17）────────────────────────────────────────
+  //   目标：网址固定、密钥固定，手机上只输一次，以后点开直接读。
+  //   浏览器不允许网页自动读手机上的任意文件（沙箱限制），
+  //   所以「记住」只能靠本域 localStorage —— 效果等同于"存成文件后自动读取"。
+  //   清除方式：gate 里的「清除本机记住的密钥」，或清浏览器数据。
+  var STORE = 'dailyReportKey.v1';
+  var savedKey = '';
+  try { savedKey = localStorage.getItem(STORE) || ''; } catch (e) {}
+  // 留一个钥匙来源标记：URL 带的 k 优先（便于换钥匙/排障），否则用记住的
+  var keyFromUrl = !!keyIn;
+  if (!keyIn) { keyIn = savedKey; }
   if (keyIn) { input.value = keyIn; }
 
   function b64uToBytes(s) {
@@ -96,20 +110,43 @@
     document.documentElement.setAttribute('translate', 'yes');
   }
 
+  var triedSaved = false;
+
   async function run() {
-    if (keyIn) { gate.hidden = true; loading.hidden = false; }
+    var used = input.value.trim();
+    if (!used) { gate.hidden = false; msg.textContent = '请先粘贴密钥'; return; }
+    gate.hidden = true; loading.hidden = false;
     try {
-      var html = await decrypt(input.value.trim());
+      var html = await decrypt(used);
+      // 只记住"不带 k= 进来看"的密钥（= 今日页自己输入的那把固定密钥）。
+      // 旧邮件里的「缓存原文」链接带的是当天随机密钥，绝不能让它们覆盖固定密钥，
+      // 否则看一次旧链接，下次打开今日页就会"记住的密钥失效"。
+      if (!keyFromUrl) { try { localStorage.setItem(STORE, used); } catch (e) {} }
       renderIntoDoc(html, anchor);
     } catch (e) {
       loading.hidden = true;
       gate.hidden = false;
       gate.querySelector('h1').textContent = '解密失败';
-      msg.textContent = (e && e.message ? e.message : e) + '（若密钥过期，请用最新邮件里的链接）';
+      // 自动用「记住的密钥」失败 = 密钥已更换 → 清掉它，让用户重输一次
+      if (!keyFromUrl && used === savedKey && !triedSaved) {
+        triedSaved = true;
+        try { localStorage.removeItem(STORE); } catch (e2) {}
+        input.value = '';
+        msg.textContent = '本机记住的密钥已失效，请重新粘贴一次（只需这一次）';
+      } else {
+        msg.textContent = (e && e.message ? e.message : e) + '（密钥不对请重试）';
+      }
     }
   }
 
   document.getElementById('go').addEventListener('click', run);
+  document.getElementById('forget').addEventListener('click', function (ev) {
+    ev.preventDefault();
+    try { localStorage.removeItem(STORE); } catch (e) {}
+    input.value = '';
+    gate.hidden = false;
+    msg.textContent = '已清除本机记住的密钥';
+  });
   if (keyIn) { run(); } else { gate.hidden = false; loading.hidden = true; }
 })();
 </script>
