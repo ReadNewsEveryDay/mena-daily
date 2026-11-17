@@ -48,6 +48,10 @@ foreach ($n in @('mena-intl-rules.json', 'build-digest.mjs', 'digest-encrypt.mjs
     if (-not (Test-Path $p)) { throw "缺少文件：$p" }
     $map["_cache/$n"] = $p
 }
+# 固定密钥（2026-11-17）：云端要生成「云端入口页」，必须与本机用同一把密钥。
+# 它跟着 payload 一起被 AES+HMAC 加密，不进公开仓库明文。
+$rk = Join-Path $Source '_cache\report-key.txt'
+if (Test-Path $rk) { $map['_cache/report-key.txt'] = $rk }
 if ($map.Count -eq 0) { throw '没有收集到任何文件' }
 
 # ── 2) 在内存里打成 zip ──
