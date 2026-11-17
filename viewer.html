@@ -74,12 +74,13 @@
     return out;
   }
 
-  async function decrypt(keyText) {
+  async function decrypt(keyText, dataOverride) {
     if (!(window.crypto && crypto.subtle)) { throw new Error('no WebCrypto (need https)'); }
     var raw = b64uToBytes(keyText);
-    if (raw.length !== 32) { throw new Error('bad key length'); }
-    var res = await fetch(dataName, { cache: 'no-store' });
-    if (!res.ok) { throw new Error('fetch ciphertext: HTTP ' + res.status); }
+    if (raw.length !== 32) { var ke = new Error('密钥长度不对'); ke.key = true; throw ke; }
+    var res = await fetch(dataOverride || dataName, { cache: 'no-store' });
+    // 取不到密文 ≠ 密钥不对：分开抛，调用方才能给出正确提示
+    if (!res.ok) { var he = new Error('HTTP ' + res.status); he.http = res.status; throw he; }
     var box = await res.json();
     if (!box || box.alg !== 'AES-256-GCM') { throw new Error('unknown container'); }
     var key = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
@@ -115,26 +116,54 @@
   async function run() {
     var used = input.value.trim();
     if (!used) { gate.hidden = false; msg.textContent = '请先粘贴密钥'; return; }
-    gate.hidden = true; loading.hidden = false;
+    gate.hidden = true; loading.hidden = false; msg.textContent = '';
     try {
-      var html = await decrypt(used);
-      // 只记住"不带 k= 进来看"的密钥（= 今日页自己输入的那把固定密钥）。
-      // 旧邮件里的「缓存原文」链接带的是当天随机密钥，绝不能让它们覆盖固定密钥，
-      // 否则看一次旧链接，下次打开今日页就会"记住的密钥失效"。
-      if (!keyFromUrl) { try { localStorage.setItem(STORE, used); } catch (e) {} }
+      var html;
+      try {
+        html = await decrypt(used);
+      } catch (e) {
+        // 取不到密文（404/网络）时，重读 latest.json 再试一次：
+        // 页面刚发布的那几分钟，索引和数据文件可能不同步。
+        if (e && e.http) {
+          var m = null;
+          try {
+            m = await fetch('latest.json?_=' + Date.now(), { cache: 'no-store' })
+                  .then(function (r) { return r.json(); });
+          } catch (e2) { m = null; }
+          if (m && m.data && m.data !== dataName) {
+            dataName = m.data;
+            html = await decrypt(used, m.data);
+          } else { throw e; }
+        } else { throw e; }
+      }
+      // 记住密钥：
+      //   · 不带 k= 进来的（今日页里自己输入）→ 记住；
+      //   · 带 k= 但看的是「今日日报整页」(…-report-xxx.json) → 也记住，
+      //     这样把带密钥的链接存成书签后，以后连粘贴都不用。
+      //   · 旧邮件的「缓存原文」单篇链接（…-ar-xxx.json）→ 不覆盖，避免把固定密钥冲掉。
+      var isReport = /-report-[0-9a-f]+\.json$/i.test(dataName);
+      if (!keyFromUrl || isReport) {
+        try { localStorage.setItem(STORE, used); } catch (e3) {}
+      }
       renderIntoDoc(html, anchor);
     } catch (e) {
       loading.hidden = true;
       gate.hidden = false;
-      gate.querySelector('h1').textContent = '解密失败';
+      gate.querySelector('h1').textContent = '打开失败';
       // 自动用「记住的密钥」失败 = 密钥已更换 → 清掉它，让用户重输一次
-      if (!keyFromUrl && used === savedKey && !triedSaved) {
+      if (!keyFromUrl && used === savedKey && !triedSaved && !(e && e.http)) {
         triedSaved = true;
         try { localStorage.removeItem(STORE); } catch (e2) {}
         input.value = '';
         msg.textContent = '本机记住的密钥已失效，请重新粘贴一次（只需这一次）';
+      } else if (e && e.http) {
+        msg.textContent = '页面数据暂时取不到（HTTP ' + e.http + '）——不是密钥问题，稍后点「解密并阅读」重试';
+      } else if (e && e.key) {
+        msg.textContent = '密钥格式不对（应为 43 个字符），请重新复制完整的一串';
+      } else if (e && (e.name === 'OperationError' || /operation/i.test(String(e.message || '')))) {
+        msg.textContent = '密钥不对，请检查后重试';
       } else {
-        msg.textContent = (e && e.message ? e.message : e) + '（密钥不对请重试）';
+        msg.textContent = (e && e.message ? e.message : e) + '——请稍后再试';
       }
     }
   }
