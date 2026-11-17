@@ -40,6 +40,9 @@
   <p class="hint"><a href="#" id="forget">清除本机记住的密钥</a></p>
 </div>
 <div id="loading" hidden>Decrypting…</div>
+<!-- 正文渲染到这里，不要用 innerHTML 替换 body：否则 gate/loading 会被销毁，
+     页内跳转（hashchange）失败时就无法再显示错误提示。 -->
+<div id="content" hidden></div>
 
 <script>
 (function () {
@@ -50,6 +53,7 @@
   var anchor   = params.get('i') || '';
   var gate    = document.getElementById('gate');
   var loading = document.getElementById('loading');
+  var content = document.getElementById('content');
   var msg     = document.getElementById('msg');
   var input   = document.getElementById('k');
 
@@ -101,12 +105,15 @@
     }
     var el = id ? doc.getElementById(id) : null;
     if (el) {
-      document.body.innerHTML = el.outerHTML;
+      content.innerHTML = el.outerHTML;
       var h2 = el.querySelector('h2');
       if (h2) { document.title = h2.textContent; }
     } else {
-      document.body.innerHTML = doc.body.innerHTML;   // 兜底：整页
+      content.innerHTML = doc.body.innerHTML;   // 兜底：整页
     }
+    content.hidden = false;
+    gate.hidden = true;
+    loading.hidden = true;
     document.documentElement.lang = lang;              // 再确认一次语言
     document.documentElement.setAttribute('translate', 'yes');
   }
@@ -117,6 +124,7 @@
     var used = input.value.trim();
     if (!used) { gate.hidden = false; msg.textContent = '请先粘贴密钥'; return; }
     gate.hidden = true; loading.hidden = false; msg.textContent = '';
+    content.hidden = true;
     try {
       var html;
       try {
@@ -177,6 +185,29 @@
     msg.textContent = '已清除本机记住的密钥';
   });
   if (keyIn) { run(); } else { gate.hidden = false; loading.hidden = true; }
+
+  // ── 页内跳转（2026-11-17）────────────────────────────────────────
+  //   「今日日报」整页本身就是 viewer.html：点页内的「缓存原文」只是把 hash 换成
+  //   另一组 d/k/i，浏览器判定为**同文档锚点跳转**，不会重新加载 ——
+  //   旧代码只读一次 hash，于是"点了没反应"。
+  //   这里监听 hashchange，按新的参数重新解密渲染；#mena/#top 这类页内锚点不动。
+  window.addEventListener('hashchange', function () {
+    var p = new URLSearchParams(location.hash.replace(/^#/, ''));
+    var d = p.get('d') || '';
+    if (!d) { return; }
+    dataName   = d;
+    anchor     = p.get('i') || '';
+    var k      = p.get('k') || '';
+    keyFromUrl = !!k;
+    if (!k) {
+      try { k = localStorage.getItem(STORE) || ''; } catch (e) {}
+      keyFromUrl = false;
+    }
+    keyIn = k;
+    if (k) { input.value = k; }
+    window.scrollTo(0, 0);
+    run();
+  });
 })();
 </script>
 </body>
