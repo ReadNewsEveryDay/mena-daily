@@ -205,6 +205,10 @@
     }
     keyIn = k;
     if (k) { input.value = k; }
+    // 同文档换页时浏览器不会重判语种：这里按新链接的 &l= 把页面语言改掉，
+    // 否则 renderIntoDoc 会回退到打开时的旧值（表现为"原语言固定为英文"）。
+    window.__LANG__ = p.get('l') || 'en';
+    document.documentElement.lang = window.__LANG__;
     window.scrollTo(0, 0);
     run();
   });
