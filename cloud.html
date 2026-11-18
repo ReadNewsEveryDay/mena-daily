@@ -1,0 +1,31 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>今日日报（云端）</title>
+<style>
+html,body{height:100%}
+body{margin:0;display:flex;align-items:center;justify-content:center;background:#fff;
+  font:16px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#333}
+#st{color:#888}
+</style></head><body>
+<p id="st">正在打开今日日报（云端）…</p>
+<script>
+(function () {
+  // 允许用 #k= 临时指定密钥（换密钥/排错时用）；平时不带，viewer 会用本机记住的那把。
+  var m0 = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+  var k = m0.get('k') || '';
+  // ⚠ 变量名后面紧跟 ? 时必须用花括号包起来，否则 PowerShell 会把 "?…" 也当成变量名
+  //    的一部分（未定义 → 空串），页面就变成 fetch('=…') → 永远 404。
+  fetch('latest-cloud.json?_=' + Date.now(), { cache: 'no-store' })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (m) {
+      var h = 'd=' + encodeURIComponent(m.data);
+      if (k) h += '&k=' + encodeURIComponent(k);
+      location.replace('viewer.html#' + h);
+    })
+    .catch(function (e) {
+      document.getElementById('st').textContent = '暂时取不到今日日报（云端）（' + e.message + '），请稍后重试。';
+    });
+})();
+</script>
+</body></html>
