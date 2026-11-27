@@ -1,25 +1,25 @@
 {
-    "date":  "2026-11-26",
-    "data":  "data/2026-11-26-report-b30b90.json",
+    "date":  "2026-11-27",
+    "data":  "data/2026-11-27-report-afb9e2.json",
     "pageUrl":  "https://readnewseveryday.github.io/mena-daily/today.html",
-    "title":  "今日日报 2026-11-26",
-    "updated":  "2026-11-27T00:49:20.3028626+08:00",
+    "title":  "今日日报 2026-11-27",
+    "updated":  "2026-11-28T00:45:30.3779676+08:00",
     "sections":  [
                      {
                          "id":  "cards",
                          "title":  "热点事件卡",
-                         "count":  59
+                         "count":  58
                      },
                      {
                          "id":  "intl",
                          "title":  "国际新闻日报",
-                         "count":  129
+                         "count":  135
                      },
                      {
                          "id":  "mena",
                          "title":  "中东官媒日报",
-                         "count":  277
+                         "count":  140
                      }
                  ],
-    "items":  465
+    "items":  333
 }
