@@ -1,20 +1,20 @@
 {
-    "date":  "2026-11-25",
-    "data":  "data/2026-11-25-report-cloud-b1bebb.json",
+    "date":  "2026-11-26",
+    "data":  "data/2026-11-26-report-cloud-4b7a47.json",
     "pageUrl":  "https://readnewseveryday.github.io/mena-daily/cloud.html",
-    "title":  "今日日报（云端） 2026-11-25",
-    "updated":  "2026-11-26T02:16:33.9505477+00:00",
+    "title":  "今日日报（云端） 2026-11-26",
+    "updated":  "2026-11-27T02:08:04.9414204+00:00",
     "sections":  [
                      {
                          "id":  "intl",
                          "title":  "国际新闻日报",
-                         "count":  146
+                         "count":  126
                      },
                      {
                          "id":  "mena",
                          "title":  "中东官媒日报",
-                         "count":  380
+                         "count":  327
                      }
                  ],
-    "items":  526
+    "items":  453
 }
